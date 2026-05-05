@@ -1,4 +1,5 @@
 import os
+import time
 import urllib.request
 import urllib.error
 import json
@@ -184,21 +185,43 @@ def send_feishu_notification(update_time, all_results):
         }
     }
 
-    try:
-        req = urllib.request.Request(
-            FEISHU_WEBHOOK_URL,
-            data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST'
-        )
-        response = urllib.request.urlopen(req, timeout=10)
-        resp_data = json.loads(response.read().decode('utf-8'))
-        if resp_data.get("code") == 0:
-            print("\n📨 飞书通知发送成功")
-        else:
-            print(f"\n⚠️ 飞书通知发送失败: {resp_data}")
-    except Exception as e:
-        print(f"\n⚠️ 飞书通知发送异常: {e}")
+    max_retries = 5
+    retry_delay = 120  # 2分钟
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = urllib.request.Request(
+                FEISHU_WEBHOOK_URL,
+                data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            response = urllib.request.urlopen(req, timeout=10)
+            resp_data = json.loads(response.read().decode('utf-8'))
+
+            if resp_data.get("code") == 0:
+                print("\n📨 飞书通知发送成功")
+                return
+            elif resp_data.get("code") == 11232:
+                print(f"\n⚠️ 飞书通知触发频率限制 (11232)，第 {attempt}/{max_retries} 次尝试")
+                if attempt < max_retries:
+                    print(f"   等待 {retry_delay} 秒后重试...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"   已达最大重试次数，放弃发送。")
+                    return
+            else:
+                print(f"\n⚠️ 飞书通知发送失败: {resp_data}")
+                return
+
+        except Exception as e:
+            print(f"\n⚠️ 飞书通知发送异常 (第 {attempt}/{max_retries} 次): {e}")
+            if attempt < max_retries:
+                print(f"   等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print(f"   已达最大重试次数，放弃发送。")
+                return
 
 
 def main():
