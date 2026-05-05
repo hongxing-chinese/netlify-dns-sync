@@ -74,16 +74,17 @@ def fetch_ips():
             "liantong": result.get("liantong", []),
             "yidong": result.get("yidong", [])
         }
+        default_ips = result.get("default", [])
 
-        print(f"获取成功: 电信 {len(ips['dianxin'])}个, 联通 {len(ips['liantong'])}个, 移动 {len(ips['yidong'])}个\n")
-        return ips, update_time
+        print(f"获取成功: 电信 {len(ips['dianxin'])}个, 联通 {len(ips['liantong'])}个, 移动 {len(ips['yidong'])}个, 默认 {len(default_ips)}个\n")
+        return ips, default_ips, update_time
 
     except Exception as e:
         print(f"获取或解析 JSON 失败: {e}")
         return None, 0
 
 
-def update_huawei_dns(client, domain_config, line_key, ip_list):
+def update_huawei_dns(client, domain_config, line_key, ip_list, default_ips):
     """更新单条解析记录，返回结果字典"""
     domain_name = domain_config["domain_name"]
     zone_id = domain_config["zone_id"]
@@ -105,11 +106,17 @@ def update_huawei_dns(client, domain_config, line_key, ip_list):
         result["error"] = "未配置 recordset_id"
         return result
 
+    # 如果运营商 IP 列表为空，则使用 default IP 作为回退
     if not ip_list:
-        msg = f"  ⏭️  [{domain_name}] 的 [{line_name}] IP 列表为空，跳过更新以免清空记录。"
-        print(msg)
-        result["error"] = "IP 列表为空"
-        return result
+        if default_ips:
+            ip_list = default_ips
+            result["ips"] = ip_list
+            print(f"  ⚠️  [{domain_name}] 的 [{line_name}] IP 列表为空，使用默认 IP: {ip_list}")
+        else:
+            msg = f"  ⏭️  [{domain_name}] 的 [{line_name}] IP 列表为空且无默认 IP，跳过更新以免清空记录。"
+            print(msg)
+            result["error"] = "IP 列表为空且无默认 IP"
+            return result
 
     try:
         request = UpdateRecordSetRequest()
@@ -231,7 +238,7 @@ def main():
         return
 
     # 1. 获取最新 IP
-    target_ips, update_time = fetch_ips()
+    target_ips, default_ips, update_time = fetch_ips()
     if not target_ips:
         return
 
@@ -249,7 +256,7 @@ def main():
 
         for line_key in ["dianxin", "liantong", "yidong"]:
             ip_list = target_ips.get(line_key, [])
-            result = update_huawei_dns(client, domain, line_key, ip_list)
+            result = update_huawei_dns(client, domain, line_key, ip_list, default_ips)
             all_results.append(result)
 
         print("-" * 40)
