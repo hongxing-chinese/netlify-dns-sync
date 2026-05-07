@@ -7,7 +7,7 @@
 - 定时从 GitHub 获取最新的 Netlify 三网优化 IP
 - 自动更新华为云 DNS A 记录（支持分线路解析）
 - 当某运营商线路 IP 为空时，自动回退使用 `default` 默认 IP，避免解析中断
-- 执行完成后通过飞书机器人推送结果通知
+- 每日 UTC+8 下午 16 点时段发送过去一天的运行日志汇总到飞书，发送后自动清空日志
 - 配置通过 `.env` 文件管理，安全便捷
 
 ## 项目结构
@@ -71,10 +71,10 @@ HUAWEI_REGION=ap-southeast-1
 
 1. 打开飞书电脑端，进入目标群聊
 2. 群设置 -> 添加机器人 -> 自定义机器人
-3. 安全设置：**只勾选「自定义关键词」**，输入关键词：`Netlify 优选IP更新`
+3. 安全设置：**只勾选「自定义关键词」**，输入关键词：`Netlify DNS`
 4. 复制 Webhook 地址填入 `.env`
 
-> 注意：通知消息标题为 **「Netlify 优选IP更新」**，飞书安全设置中的自定义关键词请填写这个短语。
+> 注意：通知消息标题包含 **「Netlify DNS」**，飞书安全设置中的自定义关键词请填写这个关键词。
 
 ### 4. 配置域名解析记录
 
@@ -130,7 +130,7 @@ nano .env
 # 填入你的 AK、SK、Webhook 地址
 ```
 
-### 4. 添加定时任务（每 30 分钟执行一次）
+### 4. 添加定时任务（每小时 20 分执行一次）
 
 ```bash
 crontab -e
@@ -139,7 +139,7 @@ crontab -e
 添加以下行：
 
 ```cron
-*/30 * * * * cd /home/netlify-dns-sync && /home/netlify-dns-sync/venv/bin/python /home/netlify-dns-sync/update_dns.py >> /home/netlify-dns-sync/run.log 2>&1
+20 * * * * cd /home/netlify-dns-sync && /home/netlify-dns-sync/venv/bin/python /home/netlify-dns-sync/update_dns.py >> /home/netlify-dns-sync/run.log 2>&1
 ```
 
 保存后查看是否生效：
@@ -153,6 +153,8 @@ crontab -l
 ```bash
 tail -f /home/netlify-dns-sync/run.log
 ```
+
+> 通知机制：脚本每小时 20 分执行 DNS 更新，仅在 UTC+8 时区 16:00-16:59 时段发送日志汇总通知到飞书，发送后自动清空 `run.log`。
 
 ## 数据源
 

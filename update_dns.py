@@ -3,7 +3,7 @@ import time
 import urllib.request
 import urllib.error
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from huaweicloudsdkcore.auth.credentials import BasicCredentials
 from huaweicloudsdkdns.v2.region.dns_region import DnsRegion
@@ -54,6 +54,12 @@ LINE_NAME_MAP = {
     "liantong": "联通",
     "yidong": "移动"
 }
+
+# 6. run.log 路径（与脚本同目录）
+RUN_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run.log")
+
+# 7. UTC+8 时区
+TZ_CN = timezone(timedelta(hours=8))
 
 # ================= 核心代码 =================
 
@@ -135,6 +141,112 @@ def update_huawei_dns(client, domain_config, line_key, ip_list, default_ips):
         print(f"  ❌ [{domain_name}] - [{line_name}] 更新失败! 错误: {e}")
 
     return result
+
+
+def should_send_daily_notification():
+    """
+    检查当前 UTC+8 时间是否为下午 16 点整点时段
+    返回: (should_send: bool, current_hour: int)
+    """
+    now_cn = datetime.now(TZ_CN)
+    current_hour = now_cn.hour
+
+    # 判断是否在 16:00-16:59 之间
+    if current_hour == 16:
+        return True, current_hour
+    return False, current_hour
+
+
+def send_daily_log_notification():
+    """发送过去一天的日志汇总通知，发送成功后清空日志"""
+    if not FEISHU_WEBHOOK_URL:
+        print("\n未配置 FEISHU_WEBHOOK_URL，跳飞书通知。")
+        return False
+
+    # 读取 run.log 内容
+    log_content = ""
+    try:
+        if os.path.exists(RUN_LOG_PATH):
+            with open(RUN_LOG_PATH, 'r', encoding='utf-8') as f:
+                log_content = f.read().strip()
+    except Exception as e:
+        print(f"\n⚠️ 读取 run.log 失败: {e}")
+        return False
+
+    if not log_content:
+        print("\nrun.log 为空，跳过飞书通知。")
+        return False
+
+    # 获取当前 UTC+8 时间
+    now_cn = datetime.now(TZ_CN)
+    date_str = now_cn.strftime("%Y-%m-%d")
+
+    # 飞书 post 消息体
+    payload = {
+        "msg_type": "post",
+        "content": {
+            "post": {
+                "zh_cn": {
+                    "title": f"Netlify DNS 更新日志汇总 ({date_str})",
+                    "content": [
+                        [
+                            {"tag": "text", "text": f"以下是过去一天的运行日志：\n"}
+                        ],
+                        [
+                            {"tag": "text", "text": log_content[:30000]}  # 飞书消息长度限制
+                        ]
+                    ]
+                }
+            }
+        }
+    }
+
+    max_retries = 3
+    retry_delay = 60  # 1分钟
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = urllib.request.Request(
+                FEISHU_WEBHOOK_URL,
+                data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            response = urllib.request.urlopen(req, timeout=10)
+            resp_data = json.loads(response.read().decode('utf-8'))
+
+            if resp_data.get("code") == 0:
+                print("\n📨 飞书日志汇总通知发送成功")
+                # 发送成功后清空日志文件
+                try:
+                    with open(RUN_LOG_PATH, 'w', encoding='utf-8') as f:
+                        f.truncate(0)
+                    print("🗑️ run.log 已清空")
+                except Exception as e:
+                    print(f"⚠️ 清空 run.log 失败: {e}")
+                return True
+            elif resp_data.get("code") == 11232:
+                print(f"\n⚠️ 飞书通知触发频率限制 (11232)，第 {attempt}/{max_retries} 次尝试")
+                if attempt < max_retries:
+                    print(f"   等待 {retry_delay} 秒后重试...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"   已达最大重试次数，放弃发送。")
+                    return False
+            else:
+                print(f"\n⚠️ 飞书通知发送失败: {resp_data}")
+                return False
+
+        except Exception as e:
+            print(f"\n⚠️ 飞书通知发送异常 (第 {attempt}/{max_retries} 次): {e}")
+            if attempt < max_retries:
+                print(f"   等待 {retry_delay} 秒后重试...")
+                time.sleep(retry_delay)
+            else:
+                print(f"   已达最大重试次数，放弃发送。")
+                return False
+
+    return False
 
 
 def send_feishu_notification(update_time, all_results):
@@ -237,6 +349,16 @@ def main():
         print("错误：未配置 HUAWEI_AK 或 HUAWEI_SK，请检查 .env 文件")
         return
 
+    # 0. 检查是否需要发送日志汇总通知（UTC+8 下午16点整点时段）
+    should_send, current_hour = should_send_daily_notification()
+    if should_send:
+        print("=" * 50)
+        print("⏰ 当前 UTC+8 时间为 16 点时段，准备发送日志汇总通知...")
+        print("=" * 50)
+        send_daily_log_notification()
+    else:
+        print(f"当前 UTC+8 时间为 {current_hour} 点，跳过飞书通知，继续执行 DNS 更新...")
+
     # 1. 获取最新 IP
     target_ips, default_ips, update_time = fetch_ips()
     if not target_ips:
@@ -260,10 +382,6 @@ def main():
             all_results.append(result)
 
         print("-" * 40)
-
-    # 4. 发送飞书通知
-    send_feishu_notification(update_time, all_results)
-
 
 if __name__ == "__main__":
     main()
