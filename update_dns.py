@@ -33,9 +33,9 @@ DOMAINS_CONFIG = [
         "domain_name": "hxch.top",
         "zone_id": "ff8080829db652b9019df3a1c6cb6e10",
         "records": {
-            "dianxin": "ff8080829dbb46c8019df477d2c43069",
-            "liantong": "ff8080829db64170019df47853380083",
-            "yidong": "ff8080829dbb43ac019df478c863725b"
+            "dianxin": "ff8080829dbb43ac019e56565af640cc",
+            "liantong": "ff8080829e17ffac019e56580a8a554c",
+            "yidong": "ff8080829dbb43ac019e56591b864124"
         }
     },
     {
